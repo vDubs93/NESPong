@@ -1,0 +1,1 @@
+cl65 --verbose src\\source.asm -C nes.cfg -o out.nes

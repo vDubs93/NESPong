@@ -1,0 +1,686 @@
+.include "header.inc"
+.include "constants.inc"
+
+RIGHTWALL 	=$f6
+TOPWALL		=$20
+BOTTOMWALL	=$D8
+LEFTWALL	=$02
+AT_TITLE	=$00
+AT_GAME		=$01
+AT_LOSE		=$02
+PADDLE1_X	=$08
+PADDLE2_X	=$F0
+
+
+.segment "ZEROPAGE"
+gamestate: 	.res 1
+buttons1: 	.res 1
+prev_b1:	.res 1
+buttons2:	.res 1
+prev_b2:	.res 1
+score1:		.res 2
+score2:		.res 2
+player1_y:	.res 1
+player2_y:	.res 1
+ball_x:		.res 1
+ball_y:		.res 1
+ball_dir_x:	.res 1
+ball_dir_y:	.res 1
+ball_spd_x:	.res 1
+ball_spd_y:	.res 1
+bgpointlo:	.res 1
+bgpointhi:	.res 1
+counterlo:	.res 1
+counterhi:	.res 1
+nmi_wait:	.res 1
+
+.segment "BSS"
+title_up:	.res 1
+paused:		.res 1
+clr_nm_tbl:	.res 1
+
+.segment "CODE"
+
+.proc irq
+	rti
+.endproc
+
+.proc nmi
+sprite_dma:
+	lda 	#$00
+	sta		nmi_wait
+	sta 	OAMADDR
+	lda 	#$02
+	sta 	OAMDMA
+	lda 	#$00
+	sta 	PPUSCROLL
+	sta 	PPUSCROLL
+nmi_done:
+	rti
+.endproc
+
+.proc reset
+	sei
+	cld
+	jsr 	vblankwait
+	lda		#$00
+	sta		clr_nm_tbl
+	lda 	#$80
+	sta 	ball_x
+	sta 	ball_y
+	sec
+	sbc		#$08
+	sta 	player1_y
+	sta 	player2_y
+	lda 	#$00
+	sta		score1
+	sta		score1+1
+	sta		score2
+	sta		score2+1
+	sta		paused
+	sta		gamestate
+	sta		title_up
+	sta 	ball_dir_x
+	sta 	ball_dir_y
+	lda 	#$02
+	sta 	ball_spd_x
+	sta 	ball_spd_y
+	jsr clear_nametable
+clrmem:
+	lda 	#$FE
+	sta 	$0200,x
+	inx
+	bne 	clrmem
+	jsr 	vblankwait
+.endproc
+
+.proc main
+	lda 	PPUSTATUS
+	lda 	#$3f
+	sta 	PPUADDR
+	lda 	#$00
+	sta 	PPUADDR
+	ldx 	#$00
+load_palettes:
+	lda 	palette, x
+	sta 	PPUDATA
+	inx
+	cpx 	#$20
+	bne 	load_palettes
+
+	ldx 	#$2c
+load_sprites:
+	lda 	sprites,x
+	sta 	$0200,x
+	dex
+	bne 	load_sprites
+	lda 	#$FE
+	sta 	$0200
+	sta 	$0203
+	lda 	#PADDLE1_X
+	sta		$0207
+	sta		$020b
+	sta		$020f
+	lda		#PADDLE2_X
+	sta		$0213
+	sta		$0217
+	sta		$021b
+	lda		#$FE
+	sta		$0204
+	sta		$0208
+	sta		$020c
+	sta		$0210
+	sta		$0214
+	sta		$0218
+	sta		$021c
+	sta		$0220
+	sta		$0224
+	sta		$0228
+	lda 	#$00
+load_background:
+	lda 	PPUSTATUS
+	lda 	#$20
+	sta 	PPUADDR
+	lda 	#$00
+	sta 	PPUADDR
+
+	ldx 	#$00
+load_attribute:
+	lda 	PPUSTATUS
+	lda 	#$23
+	sta 	PPUADDR
+	lda 	#$c0
+	sta 	PPUADDR
+
+	ldx 	#$00
+attribute_loop:
+	lda 	attribute,x
+	sta 	PPUDATA
+	inx
+	cpx 	#$08
+	bne 	attribute_loop
+
+	lda 	#%10010000
+	sta 	PPUCTRL
+
+	lda 	#%00011110
+	sta 	PPUMASK
+do_frame:
+    inc 	nmi_wait
+	lda		gamestate
+	cmp		#AT_GAME
+	beq		run_game
+	bcc		run_title
+	bcs		run_lose
+run_game:
+	jsr		state_game
+	jmp 	wait_for_nmi
+run_title:
+	jsr		state_title
+	jmp		wait_for_nmi
+run_lose:	
+	jsr		state_lose
+wait_for_nmi:
+	lda nmi_wait
+	beq do_frame
+	jmp wait_for_nmi
+.endproc
+
+.proc read_controller
+	lda		buttons1
+	sta		prev_b1
+	lda		buttons2
+	sta		prev_b2
+;Player 1
+    lda     #$01 ; strobe the controller
+    sta     JOYPAD1
+    sta     buttons1
+    lsr     a ; shift 1 into carry, making A hold $00
+    sta     JOYPAD1 ; latch input
+read_loop1:
+    lda     JOYPAD1 ; get next bit from controller
+    lsr     a ; shift 1 into carry
+    rol     buttons1 ; rotate bits into buttons
+    bcc     read_loop1
+;Player 2
+    lda     #$01 ; strobe the controller
+    sta     JOYPAD2
+    sta     buttons2
+    lsr     a ; shift 1 into carry, making A hold $00
+    sta     JOYPAD2 ; latch input
+read_loop2:
+    lda     JOYPAD2 ; get next bit from controller
+    lsr     a ; shift 1 into carry
+    rol     buttons2 ; rotate bits into buttons
+    bcc     read_loop2
+return:
+
+    rts
+.endproc
+
+.proc state_game
+	jsr 	read_controller
+	jsr		show_score
+	lda 	buttons1
+	cmp		prev_b1
+	beq		start_not_pressed
+	lda		buttons1
+	and		#BUTTON_START
+	beq		start_not_pressed
+	lda		paused
+	eor		#$FF
+	sta		paused
+start_not_pressed:	
+	lda		paused
+	cmp		#%00000000
+	beq		no_pause
+	bne		game_paused
+no_pause:
+	jsr 	checkbuttons
+	jsr		moveball
+game_paused:
+	rts
+.endproc
+
+.proc show_score
+	;show player 1 score
+	ldx		#$00
+	lda		#$0f
+	sta		$021c
+	sta		$0220
+	sta		$0224
+	sta		$0228
+	lda		score1,x	;10s place of p1 score
+	adc		#$03
+	sta		$021d
+	lda		score2,x	;10s place of p2 score
+	adc		#$04
+	sta		$0225
+	inx
+	lda		score1,x	;1s place of p1 score
+	adc		#$04
+	sta		$0221
+	lda		score2,x	;1s place of p2 score
+	adc		#$04
+	sta		$0229
+	
+	rts
+.endproc
+
+
+.proc moveball
+horiz_move:
+	lda		ball_dir_x
+	cmp		#$00
+	beq		move_right
+move_left:
+	lda 	ball_x
+	sec
+	sbc 	ball_spd_x
+	sta 	ball_x
+	cmp 	#LEFTWALL
+	beq		reset_ball
+	bcc		reset_ball
+check_player1_upperbound:
+	lda 	player1_y
+	sec
+	sbc		#$04
+	cmp		ball_y
+	bcc		check_player1_lowerbound
+	beq		check_player1_lowerbound
+	jmp		vert_move
+check_player1_lowerbound:
+	lda		player1_y
+	clc
+	adc		#$18
+	cmp		ball_y
+	bcs		check_player1_x
+	jmp 	vert_move
+check_player1_x:
+	lda 	ball_x
+	cmp 	#PADDLE1_X+8
+	bcc		go_right
+	beq		go_right
+	lda 	ball_x
+	jmp 	vert_move
+move_right:
+	lda 	ball_x
+	clc
+	adc 	ball_spd_x
+	sta 	ball_x
+	cmp 	#RIGHTWALL
+	beq		reset_ball
+	bcs		reset_ball
+check_player2_upperbound:
+	lda 	player2_y
+	sec
+	sbc		#$04
+	cmp		ball_y
+	bcc		check_player2_lowerbound
+	beq		check_player2_lowerbound
+	jmp		vert_move
+check_player2_lowerbound:
+	lda		player2_y
+	clc
+	adc		#$18
+	cmp		ball_y
+	bcs		check_player2_x
+	jmp 	vert_move
+check_player2_x:
+	lda 	ball_x
+	cmp 	#PADDLE2_X-7
+	bcs		go_left
+	beq		go_left
+	lda 	ball_x
+	jmp 	vert_move
+go_right:
+	lda 	#$00
+	sta 	ball_dir_x
+	jmp 	vert_move
+go_left:
+	lda 	#$01
+	sta 	ball_dir_x
+	jmp		vert_move
+reset_ball:
+	ldx		#$01
+	clc
+	lda		ball_dir_x
+	beq		p1_scored
+	lda		score2,x
+	adc		#$01
+	cmp		#$0a
+	beq		greaterthan10p2
+	sta		score2,x
+	jmp		endreset
+p1_scored:
+	lda		score1,x
+	adc		#$01
+	cmp		#$0a
+	beq		greaterthan10p1
+	sta		score1,x
+	jmp		endreset
+greaterthan10p1:
+	lda		#$00
+	sta		score1,x
+	lda		score1
+	clc
+	adc		#$01
+	sta		score1
+	jmp endreset
+greaterthan10p2:
+	lda		#$00
+	sta		score2,x
+	lda		score2
+	clc
+	adc		#$01
+	sta		score2
+endreset:
+
+	lda 	#$80
+	sta		ball_x
+	sta		ball_y
+vert_move:
+	lda		ball_dir_y
+	cmp		#$00
+	beq		move_down
+move_up:
+	lda		ball_y
+	sec
+	sbc		ball_spd_y
+	sta		ball_y
+	cmp		#TOPWALL
+	beq		go_down
+	jmp		move_done
+move_down:
+	lda		ball_y
+	clc
+	adc		ball_spd_y
+	sta		ball_y
+	cmp		#BOTTOMWALL
+	beq		go_up
+	jmp		move_done
+go_down:
+	lda		#$00
+	sta		ball_dir_y
+	jmp		move_done
+go_up:
+	lda		#$01
+	sta		ball_dir_y
+move_done:
+	lda		ball_x
+	sta		$0203
+	lda		ball_y
+	sta		$0200
+	rts
+.endproc
+
+.proc checkbuttons
+	
+check_p1up_pressed:
+	lda 	buttons1
+	and 	#BUTTON_UP
+	beq 	check_p1down_pressed
+	lda 	player1_y
+	cmp		#TOPWALL
+	beq		check_p1down_pressed
+	lda 	player1_y
+	sec
+	sbc 	#$04
+	sta 	player1_y
+	jmp		check_p2up_pressed
+check_p1down_pressed:
+	lda 	buttons1
+	and	 	#BUTTON_DOWN
+	beq 	check_p2up_pressed
+	lda		player1_y
+	clc
+	adc		#$10
+	cmp		#BOTTOMWALL
+	beq		check_p2up_pressed
+	lda 	player1_y
+	clc
+	adc 	#$04
+	sta		player1_y
+check_p2up_pressed:
+	lda 	buttons2
+	and 	#BUTTON_UP
+	beq 	check_p2down_pressed
+	lda 	player2_y
+	cmp		#TOPWALL
+	beq		check_p2down_pressed
+	lda 	player2_y
+	sec
+	sbc 	#$04
+	sta 	player2_y
+	jmp		player1_move
+check_p2down_pressed:
+	lda 	buttons2
+	and	 	#BUTTON_DOWN
+	beq 	player1_move
+	lda		player2_y
+	clc
+	adc		#$10
+	cmp		#BOTTOMWALL
+	beq		player1_move
+	lda 	player2_y
+	clc
+	adc 	#$04
+	sta		player2_y
+	
+player1_move:
+	lda 	player1_y
+	sta		$0204
+	clc
+	adc		#$08
+	sta		$0208
+	clc
+	adc		#$08
+	sta		$020c
+player2_move:
+	lda		player2_y
+	sta		$0210
+	clc
+	adc		#$08
+	sta		$0214
+	clc
+	adc		#$08
+	sta		$0218
+	
+return:
+	rts
+.endproc
+
+.proc state_title
+	jsr		display_title
+	jsr		read_controller
+	lda 	buttons1
+	and		#%00010000
+	beq		keep_title
+	jsr		clear_nametable
+	jsr		displayfield
+	lda		#$01
+	sta		gamestate
+	lda		#$80
+	sta		ball_x
+	sta		ball_y
+	lda		#$78
+	sta		player1_y
+	sta		player2_y
+keep_title:
+	rts
+.endproc
+
+.proc display_title
+;check if title is up
+	lda 	title_up
+	bne		return
+	jmp		display_tiles
+display_tiles:
+	lda 	#$00
+	sta		PPUMASK
+	sta		PPUCTRL
+	adc		#$01
+	sta		title_up
+;need to display 14 tiles per row
+	lda 	PPUSTATUS
+	ldy		#$00
+bg_addr_set:
+	ldx		#$0E
+	lda		titlebackground,y
+	sta		PPUADDR
+	iny
+	lda		titlebackground,y
+	sta		PPUADDR
+	iny
+bg_tile_write:
+	lda		titlebackground,y
+	sta		PPUDATA
+	iny
+	dex
+	bne		bg_tile_write
+	cpy		#$46
+	bcc		bg_addr_set
+	
+
+	lda		PPUSTATUS
+	lda		#$23
+	sta		PPUADDR
+	lda		#$c0
+	sta		PPUADDR
+attribute_loop:
+	lda		attribute,x
+	sta		PPUDATA
+	inx
+	cpx		#$08
+	bne		attribute_loop
+	lda 	#%00011110
+	sta 	PPUMASK
+	lda 	#%10010000
+	sta 	PPUCTRL
+return:
+	
+	rts
+.endproc
+
+.proc displayfield
+	lda 	#$00
+	sta		PPUMASK
+	sta		PPUCTRL
+	lda		#<playfield
+	sta		bgpointlo
+	lda		#>playfield
+	sta		bgpointhi
+	lda		#$00
+	sta		counterlo
+	lda		#$04
+	sta		counterhi
+	ldy		#$00
+load_background:
+	lda		PPUSTATUS
+	lda		#$20
+	sta		PPUADDR
+	lda		#$00
+	sta		PPUADDR
+outer_loop:
+
+inner_loop:
+	lda		(bgpointlo),y
+	sta		PPUDATA
+	iny
+	cpy 	#$00
+	bne		inner_loop
+	inc		bgpointhi
+	inx
+	cpx		#$04
+	bne		outer_loop
+	lda 	#%00011110
+	sta 	PPUMASK
+	lda 	#%10010000
+	sta 	PPUCTRL
+	rts
+.endproc
+
+.proc clear_nametable
+	lda 	#$00
+	sta		PPUMASK
+	sta		PPUCTRL
+	lda 	PPUSTATUS
+	lda 	#$20
+	sta 	PPUADDR
+	lda		#$00
+	sta		PPUADDR
+	ldy		#$30
+outer_loop:
+	ldx		#$32
+inner_loop:
+	lda		#$00
+	sta 	PPUDATA
+	dex
+	cpx 	#$00
+	bne 	inner_loop
+	dey
+	cpy		#$00
+	bne		outer_loop
+	lda 	#$00
+	sta		clr_nm_tbl
+	lda 	#%00011110
+	sta 	PPUMASK
+	lda 	#%10010000
+	sta 	PPUCTRL
+	rts
+.endproc
+
+.proc state_lose
+	rts
+.endproc
+
+
+
+
+.proc vblankwait
+loop:
+	bit 	PPUSTATUS
+	bpl 	loop
+	rts
+.endproc
+
+.segment "VECTORS"
+.addr nmi, reset, irq
+
+.segment "RODATA"
+titlebackground:
+	.byte $21, $0a,$01,$02,$03,$01,$02,$03,$01,$00,$01,$01,$02,$03,$00,$00
+	.byte $21, $2a,$01,$00,$01,$01,$00,$01,$01,$03,$01,$01,$00,$01,$00,$00
+	.byte $21, $4a,$01,$02,$02,$01,$00,$01,$01,$04,$01,$01,$00,$00,$00,$00
+	.byte $21, $6a,$01,$00,$00,$01,$00,$01,$01,$00,$01,$01,$02,$03,$00,$00
+	.byte $21, $8a,$01,$00,$00,$04,$02,$02,$01,$00,$01,$04,$02,$02,$00,$05
+playfield:
+.incbin "playfield.nam"
+sprites:
+	.byte $FE, $00, $01, $80
+	.byte $FE, $01, $00, $80
+	.byte $FE, $02, $00, $88
+	.byte $FE, $03, $00, $80
+	.byte $FE, $01, $00, $80
+	.byte $FE, $02, $00, $88
+	.byte $FE, $03, $00, $80
+	.byte $FE, $00, $00, $40
+	.byte $FE, $00, $00, $48
+	.byte $FE, $00, $00, $E0
+	.byte $FE, $00, $00, $E8
+background:
+
+attribute:
+	.byte %00000000,%00000000,%00000000,%00000000,%00000000,%00000000,%00000000,%00000000
+palette:
+	.byte $0F,$00,$10,$20
+	.byte $0F,$00,$10,$20
+	.byte $0F,$00,$10,$20
+	.byte $0F,$00,$10,$20
+	.byte $0F,$00,$10,$20
+	.byte $0F,$1c,$2c,$3c
+	.byte $0F,$00,$10,$20
+	.byte $0F,$00,$10,$20
+
+.segment "CHR"
+.incbin "PONG.chr"
