@@ -18,6 +18,7 @@ clrmem:
 	inx
 	bne 	clrmem
 	jsr		init_apu
+	ldx 	#$16
 	jsr		vblankwait
 	jmp		main
 .endproc

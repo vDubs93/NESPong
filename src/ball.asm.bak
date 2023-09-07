@@ -1,0 +1,177 @@
+.include "constants.inc"
+.segment "ZEROPAGE"
+.importzp ball_x, ball_dir_x, ball_spd_x
+.importzp ball_y, ball_dir_y, ball_spd_y
+.importzp player1_y
+.importzp player2_y
+.importzp score1, score2, p1_counter, p2_counter
+
+.segment "CODE"
+
+.import play_tone
+.export moveball
+.proc moveball
+horiz_move:
+	lda		ball_dir_x
+	cmp		#$00
+	beq		move_right
+move_left:
+	lda 	ball_x
+	sec
+	sbc 	ball_spd_x
+	sta 	ball_x
+	cmp 	#LEFTWALL
+	beq		reset_ball
+	bcc		reset_ball
+check_player1_upperbound:
+	lda 	player1_y
+	sec
+	sbc		#$04
+	cmp		ball_y
+	bcc		check_player1_lowerbound
+	beq		check_player1_lowerbound
+	jmp		vert_move
+check_player1_lowerbound:
+	lda		player1_y
+	clc
+	adc		#$18
+	cmp		ball_y
+	bcs		check_player1_x
+	jmp 	vert_move
+check_player1_x:
+	lda 	ball_x
+	cmp 	#PADDLE1_X+8
+	bcc		go_right
+	beq		go_right
+	lda 	ball_x
+	jmp 	vert_move
+move_right:
+	lda 	ball_x
+	clc
+	adc 	ball_spd_x
+	sta 	ball_x
+	cmp 	#RIGHTWALL
+	beq		reset_ball
+	bcs		reset_ball
+check_player2_upperbound:
+	lda 	player2_y
+	sec
+	sbc		#$04
+	cmp		ball_y
+	bcc		check_player2_lowerbound
+	beq		check_player2_lowerbound
+	jmp		vert_move
+check_player2_lowerbound:
+	lda		player2_y
+	clc
+	adc		#$18
+	cmp		ball_y
+	bcs		check_player2_x
+	jmp 	vert_move
+check_player2_x:
+	lda 	ball_x
+	cmp 	#PADDLE2_X-7
+	bcs		go_left
+	beq		go_left
+	lda 	ball_x
+	jmp 	vert_move
+go_right:
+	ldx		#$2C
+	ldy		#$00
+	jsr		play_tone
+	lda 	#$00
+	sta 	ball_dir_x
+	jmp 	vert_move
+go_left:
+	ldx		#$2C
+	ldy		#$00
+	jsr		play_tone
+	lda 	#$01
+	sta 	ball_dir_x
+	jmp		vert_move
+reset_ball:
+	ldx		#$01
+	clc
+	lda		ball_dir_x
+	beq		p1_scored
+	lda 	#$01
+	adc		p2_counter
+	sta		p2_counter
+	lda		score2,x
+	adc		#$01
+	cmp		#$0a
+	beq		greaterthan10p2
+	sta		score2,x
+	jmp		endreset
+p1_scored:
+	lda 	#$01
+	adc		p1_counter
+	sta		p1_counter
+	lda		score1,x
+	adc		#$01
+	cmp		#$0a
+	beq		greaterthan10p1
+	sta		score1,x
+	jmp		endreset
+greaterthan10p1:
+	lda		#$00
+	sta		score1,x
+	lda		score1
+	clc
+	adc		#$01
+	sta		score1
+	jmp endreset
+greaterthan10p2:
+	lda		#$00
+	sta		score2,x
+	lda		score2
+	clc
+	adc		#$01
+	sta		score2
+endreset:
+	lda 	ball_dir_x
+	eor		#%00000001
+	sta 	ball_dir_x
+	lda 	#$80
+	sta		ball_x
+	sta		ball_y
+vert_move:
+	lda		ball_dir_y
+	cmp		#$00
+	beq		move_down
+move_up:
+	lda		ball_y
+	sec
+	sbc		ball_spd_y
+	sta		ball_y
+	cmp		#TOPWALL
+	beq		go_down
+	jmp		move_done
+move_down:
+	lda		ball_y
+	clc
+	adc		ball_spd_y
+	sta		ball_y
+	cmp		#BOTTOMWALL
+	beq		go_up
+	jmp		move_done
+go_down:
+	ldx		#$2E
+	ldy		#$01
+	jsr		play_tone
+	lda		#$00
+	sta		ball_dir_y
+	jmp		move_done
+go_up:
+	ldx		#$2E
+	ldy		#$01
+	jsr		play_tone
+	lda		#$01
+	sta		ball_dir_y
+move_done:
+	lda		ball_x
+	sta		$0203
+	lda		ball_y
+	sta		$0200
+	rts
+.endproc
