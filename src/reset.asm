@@ -1,3 +1,4 @@
+; reset console, clear RAM (set all RAM addresses to $FE, because $00 doesn't work?  I think?)
 .include "constants.inc"
 .segment "CODE"
 .export reset

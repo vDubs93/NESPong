@@ -1,3 +1,4 @@
+; NESPong-specific reset procedure, RAM clearing and APU initialization
 .include "constants.inc"
 .segment "ZEROPAGE"
 .importzp player_x, player_y, player_frame, player_dir, player_health
@@ -38,7 +39,7 @@ clear_loop:
     rts
 .endproc
 
-.proc init_apu
+.proc init_apu ; Get that sound reset yo
     ldx #$13
 loop:
     lda regs,y

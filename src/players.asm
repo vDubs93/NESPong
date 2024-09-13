@@ -1,9 +1,13 @@
+; Paddle movement code for player 1 and player 2
+; TODO: Add CPU player
+
 .include "constants.inc"
 .segment "ZEROPAGE"
-.importzp buttons1, buttons2, prev_b1, prev_b2, player1_y, player2_y
+.importzp buttons1, buttons2, prev_b1, prev_b2, player1_y, player2_y, cursor_y
 .segment "CODE"
 
 .export checkbuttons
+.import check_if_move
 .proc checkbuttons
 	
 check_p1up_pressed:
@@ -31,7 +35,13 @@ check_p1down_pressed:
 	clc
 	adc 	#$04
 	sta		player1_y
+
 check_p2up_pressed:
+	lda		cursor_y
+	cmp		#$80
+	beq		skip_cpu
+	jsr		check_if_move
+skip_cpu:
 	lda 	buttons2
 	and 	#BUTTON_UP
 	beq 	check_p2down_pressed
@@ -66,6 +76,7 @@ player1_move:
 	clc
 	adc		#$08
 	sta		$020c
+
 player2_move:
 	lda		player2_y
 	sta		$0210

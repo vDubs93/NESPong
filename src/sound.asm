@@ -1,3 +1,4 @@
+; There are duplicate procedures here... why?  I'm going to need to go over this project again
 .include "constants.inc"
 .segment "CODE"
 
@@ -29,6 +30,7 @@ loop:
 .endproc
 
 .segment "RODATA"
+; Low bytes for standard tuning
 periodTableLo:
   .byte $f1,$7f,$13,$ad,$4d,$f3,$9d,$4c,$00,$b8,$74,$34
   .byte $f8,$bf,$89,$56,$26,$f9,$ce,$a6,$80,$5c,$3a,$1a

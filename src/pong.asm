@@ -25,12 +25,14 @@ bgpointhi:	.res 1
 counterlo:	.res 1
 counterhi:	.res 1
 nmi_wait:	.res 1
+cursor_y:	.res 1
 .exportzp ball_x, ball_dir_x, ball_spd_x
 .exportzp ball_y, ball_dir_y, ball_spd_y
 .exportzp player1_y
 .exportzp player2_y
-.exportzp buttons1, buttons2, prev_b1, prev_b2
+.exportzp buttons1, buttons2, prev_b1, prev_b2, cursor_y
 .exportzp score1, score2, p1_counter, p2_counter
+.importzp difficulty, seed, movetimer
 .segment "BSS"
 title_up:	.res 1
 paused:		.res 1
@@ -62,6 +64,12 @@ nmi_done:
 .export main
 
 .proc main
+	lda		#00
+	sta		movetimer
+	lda 	#00
+	sta		difficulty
+	lda		#80
+	sta		seed+1
 	lda		#$00
 	sta		clr_nm_tbl
 	lda 	#$80
@@ -71,6 +79,8 @@ nmi_done:
 	sbc		#$08
 	sta 	player1_y
 	sta 	player2_y
+	lda		#$67
+	sta		cursor_y
 	lda 	#$00
 	sta		p1_counter
 	sta		p2_counter
@@ -79,9 +89,7 @@ nmi_done:
 	sta		score2
 	sta		score2+1
 	sta		paused
-	lda		#$00
 	sta		gamestate
-	lda		#$00
 	sta		title_up
 	sta 	ball_dir_x
 	sta 	ball_dir_y
@@ -101,37 +109,6 @@ load_palettes:
 	inx
 	cpx 	#$20
 	bne 	load_palettes
-
-	ldx 	#$2c
-load_sprites:
-	lda 	sprites,x
-	sta 	$0200,x
-	dex
-	bne 	load_sprites
-	lda 	#$FE
-	sta 	$0200
-	sta 	$0203
-	lda 	#PADDLE1_X
-	sta		$0207
-	sta		$020b
-	sta		$020f
-	lda		#PADDLE2_X
-	sta		$0213
-	sta		$0217
-	sta		$021b
-	lda		#$FE
-	sta		$0204
-	sta		$0208
-	sta		$020c
-	sta		$0210
-	sta		$0214
-	sta		$0218
-	sta		$021c
-	sta		$0220
-	sta		$0224
-	sta		$0228
-	lda 	#$00
-	jsr 	clear_nametable
 load_background:
 	lda 	PPUSTATUS
 	lda 	#$20
@@ -172,13 +149,15 @@ run_game:
 	jmp 	wait_for_nmi
 run_title:
 	jsr		state_title
+	inc		seed
 	jmp		wait_for_nmi
 run_lose:	
 	jsr		state_game_over
+	inc 	seed
 wait_for_nmi:
-	lda nmi_wait
-	beq do_frame
-	jmp wait_for_nmi
+	lda 	nmi_wait
+	beq 	do_frame
+	jmp 	wait_for_nmi
 .endproc
 
 
@@ -214,16 +193,16 @@ game_paused:
 	pha
 	tya
 	pha
-	;show player 1 score
+;show player 1 score
 	ldx		#$00
-	lda		#$0f
+	lda		#$0F
 	sta		$021c
 	sta		$0220
 	sta		$0224
 	sta		$0228
 	lda		score1,x	;10s place of p1 score
 	adc		#$03
-	sta		$021d
+	sta		$021D
 	lda		score2,x	;10s place of p2 score
 	adc		#$04
 	sta		$0225
@@ -272,12 +251,74 @@ return:
 	pha
 	tya
 	pha
+	lda		title_up
+	bne 	skip_display
 	jsr		display_title
-
+	lda 	#0
+	sta		difficulty
+	lda		#$0E
+	sta		$0201
+	lda		#$00
+	sta		$0202
+	lda		#$50
+	sta 	$0203
+	ldx		#$30
+	lda		sprites,x
+	sta		$0204
+	inx
+	lda		sprites,X
+	sta		$0205
+	inx
+	lda		sprites,x
+	sta		$0206
+	inx
+	lda		sprites,x
+	sta		$0207
+	inx
+	
+skip_display:
+	lda 	cursor_y
+	sta		$0200
+	lda		#$04
+	adc		difficulty
+	sta		$0205
 	jsr		read_controller
+	lda		buttons1
+	cmp		prev_b1
+	beq		check_start
+check_right:
 	lda 	buttons1
-	and		#%00010000
-	beq		keep_title
+	and		#BUTTON_RIGHT
+	beq		check_left
+	lda		difficulty
+	cmp		#$02
+	beq		check_left
+	inc		difficulty
+check_left:
+	lda		buttons1
+	and		#BUTTON_LEFT
+	beq		check_select
+	lda		difficulty
+	beq 	check_select
+	dec 	difficulty
+check_select:
+	lda 	buttons1
+	and		#BUTTON_SELECT
+	beq		check_start
+	lda		cursor_y
+	cmp		#$80
+	bne		move_cursor_down
+	lda		#$67
+	jmp		store_cursor
+move_cursor_down:
+	lda		#$80
+store_cursor:
+	sta		cursor_y
+check_start:
+	
+	lda 	buttons1
+	and		#BUTTON_START
+	beq		check_point
 	jsr		clear_nametable
 	jsr		play_field
 	lda		#$00
@@ -290,6 +331,65 @@ return:
 	lda		#$78
 	sta		player1_y
 	sta		player2_y
+	lda		difficulty
+	cmp		#0
+	beq		set_difficulty_0
+	lda		difficulty
+	cmp		#1
+	beq		set_difficulty_1
+	lda		difficulty
+	cmp		#2
+	beq		set_difficulty_2
+
+set_difficulty_0:
+	lda		#30
+	jmp		set_difficulty
+set_difficulty_1:
+	lda		#40
+	jmp		set_difficulty
+check_point:
+	jmp keep_title
+set_difficulty_2:
+	lda		#90
+set_difficulty:
+	sta		difficulty
+	lda 	#$00
+	sta		p1_counter
+	sta		p2_counter
+	sta		score1
+	sta		score1+1
+	sta		score2
+	sta		score2+1
+	sta		paused
+	ldx 	#$2c
+load_sprites:
+	lda 	sprites,x
+	sta 	$0200,x
+	dex
+	bne 	load_sprites
+	lda 	#$FE
+	sta 	$0200
+	sta 	$0203
+	lda 	#PADDLE1_X
+	sta		$0207
+	sta		$020b
+	sta		$020f
+	lda		#PADDLE2_X
+	sta		$0213
+	sta		$0217
+	sta		$021b
+	lda		#$FE
+	sta		$0204
+	sta		$0208
+	sta		$020c
+	sta		$0210
+	sta		$0214
+	sta		$0218
+	sta		$021c
+	sta		$0220
+	sta		$0224
+	sta		$0228
+	lda 	#$00
 keep_title:
 	pla
 	tay
@@ -316,7 +416,7 @@ skip_display:
 	and		#%00010000
 	beq		keep_screen
 	jsr		clear_nametable
-	jsr		play_field
+	jsr		display_title
 	lda		#$00
 	sta		title_up
 	sta		p1_counter
@@ -325,7 +425,7 @@ skip_display:
 	sta		score1+1
 	sta		score2
 	sta		score2+1
-	lda		#$01
+	lda		#$00
 	sta		gamestate
 	lda		#$80
 	sta		ball_x
@@ -344,60 +444,55 @@ keep_screen:
 .endproc
 
 .proc display_title
-	php
-	pha
-	txa
-	pha
-	tya
-	pha
-display_tiles:
+	jsr		clear_nametable
+	inc		title_up
 	lda 	#$00
 	sta		PPUMASK
 	sta		PPUCTRL
-	adc		#$01
-	sta		title_up
-;need to display 14 tiles per row
-	lda 	PPUSTATUS
-	ldy		#$00
-bg_addr_set:
-	ldx		#$0E
-	lda		titlebackground,y
+	;clear sprites off of screen
+	lda 	#$FE
+	sta 	$0200
+	sta 	$0203
+	lda		#$FE
+	sta		$0204
+	sta		$0208
+	sta		$020c
+	sta		$0210
+	sta		$0214
+	sta		$0218
+	sta		$021c
+	sta		$0220
+	sta		$0224
+	sta		$0228
+	lda		#<title
+	sta		bgpointlo
+	lda		#>title
+	sta		bgpointhi
+	jsr		draw_tilemap
+	ldx		PPUSTATUS
+	lda 	#$22
 	sta		PPUADDR
-	iny
-	lda		titlebackground,y
+	lda		#$50
 	sta		PPUADDR
-	iny
-bg_tile_write:
-	lda		titlebackground,y
+	tya
 	sta		PPUDATA
-	iny
+	ldx		PPUSTATUS
+	lda		#$2B
+	sta		PPUADDR
+	lda		#$E8
+	sta		PPUADDR
+	ldx 	#$08
+	lda		#%01010101
+write_attribute:
+	sta		PPUDATA
 	dex
-	bne		bg_tile_write
-	cpy		#$46
-	bcc		bg_addr_set
+	bne		write_attribute
 	
-
-	lda		PPUSTATUS
-	lda		#$23
-	sta		PPUADDR
-	lda		#$c0
-	sta		PPUADDR
-attribute_loop:
-	lda		attribute,x
-	sta		PPUDATA
-	inx
-	cpx		#$08
-	bne		attribute_loop
 	lda 	#%00011110
 	sta 	PPUMASK
 	lda 	#%10010000
 	sta 	PPUCTRL
-	pla
-	tay
-	pla
-	tax
-	pla
-	plp
+return:
 	rts
 .endproc
 
@@ -559,12 +654,8 @@ loop:
 .addr nmi, reset, irq
 
 .segment "RODATA"
-titlebackground:
-	.byte $21, $0a,$01,$02,$03,$01,$02,$03,$01,$00,$01,$01,$02,$03,$00,$00
-	.byte $21, $2a,$01,$00,$01,$01,$00,$01,$01,$03,$01,$01,$00,$01,$00,$00
-	.byte $21, $4a,$01,$02,$02,$01,$00,$01,$01,$04,$01,$01,$00,$00,$00,$00
-	.byte $21, $6a,$01,$00,$00,$01,$00,$01,$01,$00,$01,$01,$02,$03,$00,$00
-	.byte $21, $8a,$01,$00,$00,$04,$02,$02,$01,$00,$01,$04,$02,$02,$00,$05
+title:
+.incbin "title.nam"
 playfield:
 .incbin "playfield.nam"
 gameover:
@@ -581,6 +672,8 @@ sprites:
 	.byte $FE, $00, $00, $48
 	.byte $FE, $00, $00, $E0
 	.byte $FE, $00, $00, $E8
+	.byte $50, $0E, $00, $20
+	.byte $9F, $04, $00, $A8
 background:
 
 attribute:

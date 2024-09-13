@@ -1,7 +1,7 @@
 .include "constants.inc"
 
 .segment "ZEROPAGE"
-.importzp buttons1, buttons2, prev_b1, prev_b2
+.importzp buttons1, buttons2, prev_b1, prev_b2, cursor_y
 
 .segment "CODE"
 
@@ -22,6 +22,9 @@ read_loop1:
     lsr     a ; shift 1 into carry
     rol     buttons1 ; rotate bits into buttons
     bcc     read_loop1
+    lda     cursor_y
+    cmp     #$80
+    bne     return
 ;Player 2
     lda     #$01 ; strobe the controller
     sta     JOYPAD2
